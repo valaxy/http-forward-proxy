@@ -165,3 +165,14 @@ server.on('connect', function (request, socket, bodyhead) {
 		proxySocket.end();
 	})
 })
+
+//// create HTTPS server
+//https.createServer({
+//	key : fs.readFileSync('d:/catest/proxpy.pem'),
+//	cert: fs.readFileSync('d:/catest/proxpy.crt')
+//}, createOnRequest(createProxyReq, http))
+//	.on('error', function (err) {
+//		console.error(err)
+//	})
+//	.listen(8887)
+//console.log('listen to 127.0.0.1:443')

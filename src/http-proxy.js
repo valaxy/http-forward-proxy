@@ -8,6 +8,7 @@ var http       = require('http'),
 
 var proxyUrl
 var createProxyReqOptionsWithProxy = function (req) {
+	delete req.headers['accept-encoding'] // do not want encode
 	return {
 		hostname: proxyUrl.hostname,
 		port    : proxyUrl.port,
@@ -19,15 +20,12 @@ var createProxyReqOptionsWithProxy = function (req) {
 
 
 var createProxyReqOptionsNoProxy = function (req) {
-	//console.log(req)
-	var reqUrl = url.parse(req.url)
-	console.log(req.url)
 	return {
-		host   : 'mp.weixin.qq.com', // req.headers['host'],
-		path   : req.path,
-		port   : req.port,
-		method : req.method,
-		headers: req.headers
+		hostname: req.headers['host'],
+		path    : req.path,
+		port    : req.port,
+		method  : req.method,
+		headers : req.headers
 	}
 }
 
@@ -37,15 +35,42 @@ var getInjectScript = function () {
 }
 
 
-var createOnRequest = function (createProxyReq, httpOrHttps) {
-	var isHttp = httpOrHttps === http
+var directProxy = function (proxyRes, req, res) {
+	proxyRes.on('data', function (chunk) {
+		res.write(chunk)
+	})
+	proxyRes.on('end', function () {
+		res.end()
+	})
+}
+
+
+var injectProxy = function (proxyRes, req, res) {
+	var html = ''
+	proxyRes.on('data', function (chunk) {
+		html += chunk
+	})
+	proxyRes.on('end', function () {
+		var injectPos = html.toLowerCase().indexOf('<head>')
+		if (injectPos >= 0) {
+			res.write(html.substr(0, injectPos + 6))
+			res.write(getInjectScript())
+			res.write(html.substr(injectPos + 6))
+		} else {
+			console.error(req.url + '  cannot inject js')
+		}
+		res.end()
+	})
+}
+
+
+var createOnRequest = function (createProxyReq) {
 	return function (req, res) {
-		console.log('a ' + (isHttp ? 'http' : 'https') + ' come: ' + req.url)
+		//console.log('a http come: ' + req.url)
 
 		// make a proxy request
 		var reqOptions = createProxyReq(req)
-		console.log(reqOptions)
-		httpOrHttps.request(reqOptions, function (proxyRes) {
+		http.request(reqOptions, function (proxyRes) {
 			proxyRes.headers.connection = 'close'      // proxy no need connection
 			delete proxyRes.headers['content-length'] // content-length has changed
 
@@ -53,34 +78,15 @@ var createOnRequest = function (createProxyReq, httpOrHttps) {
 			//if (proxyRes.statusCode != 200) {
 			//	console.warn(proxyRes.statusCode)
 			//}
-			console.log('here')
-
-			var findInject = false
-			var index
 
 			var contentType
-			var onData
-			if ((contentType = proxyRes.headers['content-type']) && contentType.indexOf('text/html') >= 0) {
-				onData = function (chunk) {
-					if (!findInject && ((index = injectFind(chunk)) >= 0)) {
-						findInject = true
-						res.write(chunk.slice(0, index + 1), 'binary')
-						res.write(getInjectScript())
-						res.write(chunk.slice(index + 1), 'binary')
-						return
-					}
-					res.write(chunk, 'binary')
-				}
+			var isHTML = (contentType = proxyRes.headers['content-type']) && contentType.indexOf('text/html') >= 0
+			if (isHTML) {
+				injectProxy(proxyRes, req, res)
 			} else {
-				onData = function (chunk) {
-					res.write(chunk, 'binary')
-				}
+				directProxy(proxyRes, req, res)
 			}
 
-			proxyRes.on('data', onData)
-			proxyRes.on('end', function () {
-				res.end()
-			})
 		}).on('error', function (err) {
 			console.error(err)
 		}).end()
@@ -101,29 +107,16 @@ module.exports = function (config) {
 
 
 	// create HTTP server
-	http.createServer(createOnRequest(createProxyReq, http))
+	http.createServer(createOnRequest(createProxyReq))
 		.on('error', function (err) {
 			console.error(err)
 		})
 		.listen(config.port)
 	console.log('listen to 127.0.0.1:%s', config.port)
 
-
-	// create HTTPS server
-	https.createServer({
-		key : fs.readFileSync('d:/catest/proxpy.pem'),
-		cert: fs.readFileSync('d:/catest/proxpy.crt')
-	}, createOnRequest(createProxyReq, http))
-		.on('error', function (err) {
-			console.error(err)
-		})
-		.listen(8887)
-	console.log('listen to 127.0.0.1:443')
-
-
-	// for test
-	http.createServer(function (req, res) {
-		res.write('123')
-		res.end()
-	}).listen(9999)
+	//// for test
+	//http.createServer(function (req, res) {
+	//	res.write('123')
+	//	res.end()
+	//}).listen(9999)
 }
