@@ -1,13 +1,12 @@
-var http       = require('http'),
-    fs         = require('fs'),
-    url        = require('url'),
-    injectFind = require('./inject'),
-    path       = require('path'),
-    https      = require('https')
+var http  = require('http'),
+    fs    = require('fs'),
+    url   = require('url'),
+    path  = require('path'),
+    https = require('https')
 
 
 var proxyUrl
-var createProxyReqOptionsWithProxy = function (req) {
+var createTranspondOptionsWithProxy = function (req) {
 	delete req.headers['accept-encoding'] // do not want encode
 	return {
 		hostname: proxyUrl.hostname,
@@ -19,11 +18,11 @@ var createProxyReqOptionsWithProxy = function (req) {
 }
 
 
-var createProxyReqOptionsNoProxy = function (req) {
+var createTranspondOptionsNoProxy = function (req) {
+	delete req.headers['accept-encoding'] // do not want encode
 	return {
 		hostname: req.headers['host'],
-		path    : req.path,
-		port    : req.port,
+		path    : req.url,
 		method  : req.method,
 		headers : req.headers
 	}
@@ -31,7 +30,8 @@ var createProxyReqOptionsNoProxy = function (req) {
 
 
 var getInjectScript = function () {
-	return '<script>' + fs.readFileSync(path.join(__dirname, '../front/inject.js')) + '</script>'
+	return '<script>' + fs.readFileSync(path.join(__dirname, '../inject/totoro.js')) + '</script>' +
+		'<script>' + fs.readFileSync(path.join(__dirname, '../inject/report.js')) + '</script>'
 }
 
 
@@ -51,12 +51,18 @@ var injectProxy = function (proxyRes, req, res) {
 		html += chunk
 	})
 	proxyRes.on('end', function () {
-		var injectPos = html.toLowerCase().indexOf('<head>')
+		//html = html.replace('"options":[{"name":"31号 王香媛","cnt":404,"selected":true}',
+		//	'"options":[{"name":"31号 王香媛","cnt":404,"selected":false}')
+		//var matchStr = 'zepto1f908c.js"></script>'
+
+		var matchStr = '<head>'
+		var injectPos = html.toLowerCase().indexOf(matchStr)
 		if (injectPos >= 0) {
-			res.write(html.substr(0, injectPos + 6))
+			res.write(html.substr(0, injectPos + matchStr.length))
 			res.write(getInjectScript())
-			res.write(html.substr(injectPos + 6))
+			res.write(html.substr(injectPos + matchStr.length))
 		} else {
+			res.write(html)
 			console.error(req.url + '  cannot inject js')
 		}
 		res.end()
@@ -64,59 +70,62 @@ var injectProxy = function (proxyRes, req, res) {
 }
 
 
-var createOnRequest = function (createProxyReq) {
-	return function (req, res) {
-		//console.log('a http come: ' + req.url)
+var onRequest = function (req, res) {
+	// make a transpond request
+	var options = this._createTranspondOptions(req)
+	http.request(options, function (transpondRes) {
+		transpondRes.headers.connection = 'close'      // no need connection
+		delete transpondRes.headers['content-length'] // content-length has changed
 
-		// make a proxy request
-		var reqOptions = createProxyReq(req)
-		http.request(reqOptions, function (proxyRes) {
-			proxyRes.headers.connection = 'close'      // proxy no need connection
-			delete proxyRes.headers['content-length'] // content-length has changed
+		res.writeHead(transpondRes.statusCode, transpondRes.headers)
 
-			res.writeHead(proxyRes.statusCode, proxyRes.headers)
-			//if (proxyRes.statusCode != 200) {
-			//	console.warn(proxyRes.statusCode)
-			//}
+		var isHTML = transpondRes.headers['content-type']
+			&& transpondRes.headers['content-type'].indexOf('text/html') >= 0
 
-			var contentType
-			var isHTML = (contentType = proxyRes.headers['content-type']) && contentType.indexOf('text/html') >= 0
-			if (isHTML) {
-				injectProxy(proxyRes, req, res)
-			} else {
-				directProxy(proxyRes, req, res)
-			}
+		//
+		// choose to use proxy
+		//
+		// /__totoro_oid=[^&#]+/.test(req.url) && /__totoro_lid=[^&#]+/.test(req.url) &&
+		if (isHTML) {
+			injectProxy(transpondRes, req, res)
+		} else {
+			directProxy(transpondRes, req, res)
+		}
 
-		}).on('error', function (err) {
-			console.error(err)
-		}).end()
-	}
+	}).on('error', function (err) {
+		console.error(err)
+	}).end()
 }
 
 
-module.exports = function (config) {
-	var createProxyReq
+var HttpProxyServer = function (config) {
+	this.injectHandler = []
+	this._config = config
+	this._createTranspondOptions = null
+}
+
+
+HttpProxyServer.prototype.startServer = function () {
+	var config = this._config
 	if (config.proxy) {
 		proxyUrl = url.parse(config.proxy)
-		createProxyReq = createProxyReqOptionsWithProxy
+		this._createTranspondOptions = createTranspondOptionsWithProxy
 		console.log('use a proxy: ' + config.proxy)
-	} else {
-		createProxyReq = createProxyReqOptionsNoProxy
+	} else { // not use a proxy
+		this._createTranspondOptions = createTranspondOptionsNoProxy
 		console.log('no proxy')
 	}
 
 
 	// create HTTP server
-	http.createServer(createOnRequest(createProxyReq))
+	http.createServer(onRequest.bind(this))
 		.on('error', function (err) {
 			console.error(err)
 		})
-		.listen(config.port)
-	console.log('listen to 127.0.0.1:%s', config.port)
-
-	//// for test
-	//http.createServer(function (req, res) {
-	//	res.write('123')
-	//	res.end()
-	//}).listen(9999)
+		.listen(config.port, function () {
+			console.log('listen to 127.0.0.1:%s', config.port)
+		})
 }
+
+
+module.exports = HttpProxyServer

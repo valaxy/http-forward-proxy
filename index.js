@@ -1,5 +1,5 @@
 var program = require('commander')
-var init = require('./src/http-proxy')
+var HttpProxyServer = require('./src/http-proxy')
 var _ = require('underscore')
 
 
@@ -29,4 +29,5 @@ var config = _.extend({
 }))
 
 
-init(config)
+var server = new HttpProxyServer(config)
+server.startServer()
