@@ -1,3 +1,5 @@
 node_modules/
-local-dev/
 .idea/
+
+# local dev help files
+dev/

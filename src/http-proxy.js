@@ -1,7 +1,5 @@
 var http  = require('http'),
-    fs    = require('fs'),
     url   = require('url'),
-    path  = require('path'),
     https = require('https')
 
 
@@ -29,12 +27,6 @@ var createTranspondOptionsNoProxy = function (req) {
 }
 
 
-var getInjectScript = function () {
-	return '<script>' + fs.readFileSync(path.join(__dirname, '../inject/totoro.js')) + '</script>' +
-		'<script>' + fs.readFileSync(path.join(__dirname, '../inject/report.js')) + '</script>'
-}
-
-
 var directProxy = function (proxyRes, req, res) {
 	proxyRes.on('data', function (chunk) {
 		res.write(chunk)
@@ -51,20 +43,8 @@ var injectProxy = function (proxyRes, req, res) {
 		html += chunk
 	})
 	proxyRes.on('end', function () {
-		//html = html.replace('"options":[{"name":"31号 王香媛","cnt":404,"selected":true}',
-		//	'"options":[{"name":"31号 王香媛","cnt":404,"selected":false}')
-		//var matchStr = 'zepto1f908c.js"></script>'
-
-		var matchStr = '<head>'
-		var injectPos = html.toLowerCase().indexOf(matchStr)
-		if (injectPos >= 0) {
-			res.write(html.substr(0, injectPos + matchStr.length))
-			res.write(getInjectScript())
-			res.write(html.substr(injectPos + matchStr.length))
-		} else {
-			res.write(html)
-			console.error(req.url + '  cannot inject js')
-		}
+		html = require('../dev/inject/totoro')(html)
+		res.write(html)
 		res.end()
 	})
 }
@@ -123,7 +103,7 @@ HttpProxyServer.prototype.startServer = function () {
 			console.error(err)
 		})
 		.listen(config.port, function () {
-			console.log('listen to 127.0.0.1:%s', config.port)
+			console.log('http inject server is listening to 127.0.0.1:%s', config.port)
 		})
 }
 
